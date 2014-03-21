@@ -2,9 +2,10 @@
 
 brauer :: Int -> Int -> [Int]
 brauer k n
-	| n < 2^k = [1..n]
-	| n `div` 2^k < 2^k = [1..2^k-1] ++ filter (>=2^k) [ (n `div` 2^k) * 2^i | i <- [1..k] ] ++ [n]
-	| otherwise = brauer k (n `div` 2^k) ++ [ (n `div` 2^k) * 2^i | i <- [1..k] ] ++ [n]
+	| n < m = [1..n]
+	| n `div` m < m = [1..m-1] ++ filter (>=m) [ (n `div` m) * 2^i | i <- [1..k] ] ++ [n]
+	| otherwise = brauer k (n `div` m) ++ [ (n `div` m) * 2^i | i <- [1..k] ] ++ [n]
+	where m = 2^k
 	
 main = do
 	putStrLn "Write a number:"
