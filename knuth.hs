@@ -34,7 +34,7 @@ generate n = path $ get n (Level [(Node 1 Root)] [])
 
 -- read a number and generate a path to it
 main = do
-	putStrLn "Podaj liczbe:"
+	putStrLn "Write a number:"
 	nstr <- getLine
 	print (map val $ generate $ read nstr)
 	
