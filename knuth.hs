@@ -1,15 +1,7 @@
 -- A program generating a Knuth Power Tree
 
 -- data structure - nodes
-data TreeNode = Node Int TreeNode | Root
-
--- get value
-val (Root) = 0
-val (Node x _) = x
-
--- get parent
-parent Root = Root
-parent (Node _ x) = x
+data TreeNode = Node {val :: Int, parent :: TreeNode} | Root
 
 -- get the path to a node
 path Root = []
@@ -20,13 +12,7 @@ children ex Root = []
 children ex n@(Node v p) = [Node nv n | x <- path n, let nv = v + val x, all (/=nv) ex]
 
 -- a tree level - nodes + existing numbers
-data Level = Level [TreeNode] [Int]
-
--- get nodes
-nodes (Level n _) = n
-
--- get existing numbers
-exist (Level _ ex) = ex
+data Level = Level { nodes :: [TreeNode], exist :: [Int] }
 
 -- generate next level: children for each node
 nextLevel (Level [] ex) = Level [] ex
