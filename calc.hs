@@ -1,79 +1,72 @@
-data Operator = Add | Sub | Mul | Div | Pow | Invalid deriving (Show)
+import Control.Monad
+import Data.Char
 
-data OpTree = BinOpNode { op :: Operator, left :: OpTree, right :: OpTree } | 
-	UnOpNode { op :: Operator, val :: OpTree } |
-	ValNode Double | 
-	EmptyTree
-	deriving (Show)
+-- possible tokens
+data Token = Number Double | Operator Char | LeftParen | RightParen deriving (Show)
 
-white = [' ']
-digit = ['0'..'9']
-oper = ['+', '-', '*', '/', '^']
-unoper = ['+', '-']
+digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+operators = ['+', '-', '*', '/', '^']
+unaryOperators = ['+', '-']
 
-toOper :: Char -> Operator
-toOper '+' = Add
-toOper '-' = Sub
-toOper '*' = Mul
-toOper '/' = Div
-toOper '^' = Pow
-toOper _ = Invalid
-
-parseValue :: Double -> String -> (Double, String)
-parseValue x s@(sh:ss)
-	| sh `elem` digit = parseValue (x*10 + read [sh]) ss
-	| sh == '.' = (x + afterComaVal / 10^(ceiling $ log afterComaVal / log 10), afterComaStr)
-	| otherwise = (x, s)
+data NumberParseState = NumberParseState { mul :: Double, currentNumber :: Double, restParse :: String} | Failure String deriving (Show)
+parseNumber' :: NumberParseState -> NumberParseState
+parseNumber' s@(NumberParseState _ x "") = s
+parseNumber' s@(NumberParseState mul x (c:rest)) = 
+	case c of
+		c | c `elem` digits -> incNumber (ord c - 48)
+		'.' -> if mul < 1.0 then Failure "Double dot" else parseNumber' (NumberParseState 0.1 x rest)
+		_ 	-> s
 	where
-		afterComaVal = fst (parseValue 0 ss)
-		afterComaStr = snd (parseValue 0 ss)
-parseValue x [] = (x, "")
+		incNumber i = parseNumber' $ NumberParseState (if mul < 1.0 then mul * 0.1 else mul) (x * (if mul < 1.0 then 1 else 10) + fromIntegral i * mul) rest
+parseNumber' f@(Failure _) = f
 
-data ParenStruct = ParenStruct String String Int
-parseParenthesis :: ParenStruct -> (String, String)
-parseParenthesis (ParenStruct s1 s2 0) = (s1, s2)
-parseParenthesis (ParenStruct s1 s@(sh:ss) x)
-	| sh == '(' = parseParenthesis $ ParenStruct (s1 ++ [sh]) ss (x+1)
-	| sh == ')' = 
-		if x == 1
-		then (s1, ss)
-		else parseParenthesis $ ParenStruct (s1 ++ [sh]) ss (x-1)
-	| otherwise = parseParenthesis $ ParenStruct (s1 ++ [sh]) ss x
-	
-nextVal :: String -> (OpTree, String)
-nextVal s@(sh:ss)
-	| sh `elem` digit = (ValNode $ fst $ parseValue 0 s, snd $ parseValue 0 s)
-	| sh == '(' = (parseNext EmptyTree s1, s2)
-	| otherwise = error ("WTF nextVal: " ++ s)
+-- parse a number from the beginning of a string
+parseNumber :: String -> NumberParseState
+parseNumber s = parseNumber' $ NumberParseState { mul = 1.0, currentNumber = 0.0, restParse = s}
+
+expect :: Char -> String -> Either String String
+expect c "" = Left ("Expected '" ++ [c] ++ "', got EOF")
+expect c (s0:rest) = 
+	if c == s0 then 
+		Right rest 
+	else 
+	 	Left ("Expected '" ++ [c] ++ "', got '" ++ [s0] ++ "'")
+
+consumeToken :: String -> Either String (Token, String)
+-- returns the next token and the rest of the string
+consumeToken "" = Left "Unexpected EOF"
+consumeToken s@(c:rest) = 
+	case c of
+		c | c `elem` digits -> num
+		'.' -> num
+		c | c `elem` operators -> Right $ (Operator c, rest)
+		'(' -> Right (LeftParen, rest)
+		')' -> Right (RightParen, rest)
+		' ' -> consumeToken rest
+		_	-> Left ("Invalid character: " ++ [c])
 	where
-		(s1, s2) = parseParenthesis $ ParenStruct "" ss 1
+		state = parseNumber s
+		x = currentNumber state
+		rest' = restParse state 
+		num = 
+			case state of
+				Failure s -> Left ("Parse error: " ++ s)
+				_ -> Right (Number x, rest')
 
-parseNext :: OpTree -> String -> OpTree
-parseNext EmptyTree s@(sh:ss)
-	| sh `elem` digit = parseNext (ValNode $ fst pVal) (snd pVal)
-	| sh `elem` oper = 
-		if sh `elem` unoper
-		then parseNext (UnOpNode{ op = toOper sh, val = nVal }) nStr
-		else error ("WTF parseNext oper: " ++ s)
-	| sh == '(' = parseNext (parseNext EmptyTree s1) s2
-	| otherwise = error ("WTF parseNext:" ++ s)
-	where 
-		pVal = parseValue 0 s
-		(nVal, nStr) = nextVal ss
-		(s1, s2) = parseParenthesis $ ParenStruct "" ss 1
-		
-parseNext tree s@(sh:ss)
-	| sh `elem` digit = error ("WTF digit: " ++ s)
-	| sh `elem` oper = BinOpNode { op = toOper sh, left = tree, right = parseNext EmptyTree ss }
-	| otherwise = error ("WTF parseNext tree: " ++ s)
-	
-parseNext tree "" = tree
+tokenize :: [Token] -> String -> Either String [Token]
+-- returns splitting into tokens
+tokenize tokens "" = return tokens
+tokenize tokens str = do
+	(token, rest) <- consumeToken str
+	tokenize (tokens ++ [token]) rest
 
-parseString :: String -> OpTree
-parseString s = parseNext EmptyTree s
+-- parsing
+data ParseTree = Empty | Value Double | UnOper Char ParseTree | Oper Char ParseTree ParseTree | Paren ParseTree
+data Path = [ParseTree]
 
-main = do
-	putStrLn "Write a number:"
-	nstr <- getLine
-	print nstr
+parse' :: [Token] -> Path -> Either String Path
+parse' [] = return
+-- TODO
 
+-- parse expression in string
+parse str = parse' (tokenize [] str) Empty
