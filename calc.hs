@@ -64,14 +64,26 @@ tokenize tokens str = do
 data NodeValue = Value Double | UnOper Char | BiOper Char | Paren deriving (Show)
 data Tree = Empty | Node NodeValue (Maybe Tree) (Maybe Tree) deriving (Show)
 
+newValue :: Double -> Tree
+newValue x = Node (Value x) Nothing Nothing
+
+newUnOper :: Char -> Tree -> Tree
+newUnOper c t = Node (UnOper c) (Just t) Nothing
+
+newBiOper :: Char -> Tree -> Tree -> Tree
+newBiOper c t1 t2 = Node (BiOper c) (Just t1) (Just t2)
+
+newParen :: Tree -> Tree
+newParen t = Node Paren (Just t) Nothing
+
 type Crumb = (NodeValue, [Tree], Int)	-- (parent node, [other children], position among children)
 type Pointer = (Tree, [Crumb])	-- (currentNode, breadcrumbs)
 
 reconstructNode :: Crumb -> Tree -> Either String Tree	-- reconstructNode (value, otherChildren, pos, thisChild) -> node
-reconstructNode (o@(UnOper _), [], 0) n = return $ Node o (Just n) Nothing
-reconstructNode (o@(BiOper _), n':[], 0) n = return $ Node o (Just n) (Just n')
-reconstructNode (o@(BiOper _), n':[], 1) n = return $ Node o (Just n') (Just n)
-reconstructNode (p@Paren, [], 0) n = return $ Node p (Just n) Nothing
+reconstructNode ((UnOper o), [], 0) n = return $ newUnOper o n
+reconstructNode ((BiOper o), n':[], 0) n = return $ newBiOper o n n'
+reconstructNode ((BiOper o), n':[], 1) n = return $ newBiOper o n' n
+reconstructNode (Paren, [], 0) n = return $ newParen n
 reconstructNode _ _ = Left "Wrong parameters to reconstructNode"
 
 goUp :: Pointer -> Either String Pointer
@@ -137,38 +149,38 @@ parse' [] p@(_, _) = Left "Parse error"
 parse' (t:ts) p@(n, allc) =
 	case (t, n) of
 
-		(Number x, Empty) -> topOper (Node (Value x) Nothing Nothing, allc) >>= parse' ts
+		(Number x, Empty) -> topOper (newValue x, allc) >>= parse' ts
 		(Number x, _) -> Left ("Unexpected number: " ++ show x)
 
 		(Operator op, Empty) ->
 			if op `elem` unaryOperators then
-				goDown 0 (Node (UnOper op) (Just Empty) Nothing, allc) >>= parse' ts
+				goDown 0 (newUnOper op Empty, allc) >>= parse' ts
 			else
 				Left ([op] ++ " is not a unary operator")
 		(Operator op, Node (Value _) _ _) ->
 			if op `elem` operators then
-				goDown 1 (Node (BiOper op) (Just n) (Just Empty), allc) >>= parse' ts
+				goDown 1 (newBiOper op n Empty, allc) >>= parse' ts
 			else
 				Left ([op] ++ " is not an operator")
 		(Operator op, Node (UnOper _) _ _) -> 
 			if op `elem` operators then
-				goDown 1 (Node (BiOper op) (Just n) (Just Empty), allc) >>= parse' ts
+				goDown 1 (newBiOper op n Empty, allc) >>= parse' ts
 			else
 				Left ([op] ++ " is not an operator")
 		(Operator op, Node (BiOper op2) (Just arg1) (Just arg2)) -> 
 			if priority op < priority op2 then
-				let p' = (Node (BiOper op2) (Just arg1) (Just $ Node (BiOper op) (Just arg2) (Just Empty)), allc)
+				let p' = (newBiOper op2 arg1 $ newBiOper op arg2 Empty, allc)
 				in goDown 1 p' >>= goDown 1 >>= parse' ts
 			else
-				let p' = (Node (BiOper op) (Just n) (Just Empty), allc)
+				let p' = (newBiOper op n Empty, allc)
 				in goDown 1 p' >>= parse' ts
 		(Operator op, Node Paren _ _) ->
 			if op `elem` operators then
-				goDown 1 (Node (BiOper op) (Just n) (Just Empty), allc) >>= parse' ts
+				goDown 1 (newBiOper op n Empty, allc) >>= parse' ts
 			else
 				Left ([op] ++ " is not an operator")
 
-		(LeftParen, Empty) -> goDown 0 (Node Paren (Just Empty) Nothing, allc) >>= parse' ts
+		(LeftParen, Empty) -> goDown 0 (newParen Empty, allc) >>= parse' ts
 		(LeftParen, _) -> Left "Unexpected parenthesis: ("
 
 		(RightParen, Empty) -> Left "Unexpected parenthesis: )"
