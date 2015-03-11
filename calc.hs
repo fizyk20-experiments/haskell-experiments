@@ -61,29 +61,16 @@ tokenize tokens str = do
 	tokenize (tokens ++ [token]) rest
 
 -- parsing
-data NodeValue = Value Double | UnOper Char | BiOper Char | Paren deriving (Show)
-data Tree = Empty | Node NodeValue (Maybe Tree) (Maybe Tree) deriving (Show)
+data ParseTree = Empty | Value Double | UnOper Char ParseTree | BiOper Char ParseTree ParseTree | Paren ParseTree deriving (Show)
 
-newValue :: Double -> Tree
-newValue x = Node (Value x) Nothing Nothing
+type Crumb = ParseTree
+type Pointer = (ParseTree, [Crumb])	-- (currentNode, breadcrumbs)
 
-newUnOper :: Char -> Tree -> Tree
-newUnOper c t = Node (UnOper c) (Just t) Nothing
-
-newBiOper :: Char -> Tree -> Tree -> Tree
-newBiOper c t1 t2 = Node (BiOper c) (Just t1) (Just t2)
-
-newParen :: Tree -> Tree
-newParen t = Node Paren (Just t) Nothing
-
-type Crumb = (NodeValue, [Tree], Int)	-- (parent node, [other children], position among children)
-type Pointer = (Tree, [Crumb])	-- (currentNode, breadcrumbs)
-
-reconstructNode :: Crumb -> Tree -> Either String Tree	-- reconstructNode (value, otherChildren, pos, thisChild) -> node
-reconstructNode ((UnOper o), [], 0) n = return $ newUnOper o n
-reconstructNode ((BiOper o), n':[], 0) n = return $ newBiOper o n n'
-reconstructNode ((BiOper o), n':[], 1) n = return $ newBiOper o n' n
-reconstructNode (Paren, [], 0) n = return $ newParen n
+reconstructNode :: Crumb -> ParseTree -> Either String ParseTree	-- reconstructNode (value, otherChildren, pos, thisChild) -> node
+reconstructNode (UnOper o Empty) n = return $ UnOper o n
+reconstructNode (BiOper o Empty n') n = return $ BiOper o n n'
+reconstructNode (BiOper o n' Empty) n = return $ BiOper o n' n
+reconstructNode (Paren Empty) n = return $ Paren n
 reconstructNode _ _ = Left "Wrong parameters to reconstructNode"
 
 goUp :: Pointer -> Either String Pointer
@@ -92,31 +79,14 @@ goUp (n, c:cs) = do
 	newN <- reconstructNode c n
 	return (newN, cs)
 
-goDown :: Int -> Pointer -> Either String Pointer
-goDown i (t, cs) = 
+goDown :: Pointer -> Either String Pointer
+goDown (t, cs) = 
 	case t of
 		Empty -> Left "Can't go down from Empty"
-		Node v@(Value _) _ _ -> Left "Can't go down from Value"
-		Node v@(UnOper _) (Just n) Nothing -> 
-			if i == 0 then
-				Right (n, (v, [], 0):cs)
-			else
-				Left "UnOper only has one child"
-		Node v@Paren (Just n) Nothing -> 
-			if i == 0 then
-				Right (n, (v, [], 0):cs)
-			else
-				Left "Paren only has one child"
-		Node v@(BiOper _) (Just n1) (Just n2) ->
-			if (i == 0) || (i == 1) then
-				let
-					n = if i == 0 then n1 else n2
-					n' = if i == 0 then n2 else n1
-				in
-					Right (n, (v, [n'], i):cs)
-			else
-				Left "BiOper only has two children"
-		_ -> Left "Something went wrong"
+		Value _ -> Left "Can't go down from Value"
+		UnOper o n -> Right (n, (UnOper o Empty):cs)
+		Paren n -> Right (n, (Paren Empty):cs)
+		BiOper o n1 n2 -> Right (n2, (BiOper o n1 Empty):cs)
 
 toTop :: Pointer -> Either String Pointer
 toTop p@(_, []) = Right p
@@ -124,14 +94,14 @@ toTop p@(t, c:cs) = do
 	p' <- goUp p
 	toTop p'
 
-getTree :: Pointer -> Either String Tree
-getTree p = do
+getParseTree :: Pointer -> Either String ParseTree
+getParseTree p = do
 	(t, _) <- toTop p
 	return t
 
 curParen :: Pointer -> Either String Pointer
 curParen p@(_, []) = Right p
-curParen p@((Node Paren _ _), cs) = Right p
+curParen p@((Paren _ ), cs) = Right p
 curParen p@(t, c:cs) = do
 	p' <- goUp p
 	curParen p'
@@ -139,8 +109,8 @@ curParen p@(t, c:cs) = do
 topOper :: Pointer -> Either String Pointer
 topOper p@(n, allc) =
 	case allc of
-		((BiOper _, _, index):_) | index == 1 -> goUp p >>= topOper
-		((UnOper _, _, _):_) -> goUp p >>= topOper
+		((BiOper _ _ Empty):_) -> goUp p >>= topOper
+		((UnOper _ Empty):_) -> goUp p >>= topOper
 		_ -> return p
 
 parse' :: [Token] -> Pointer -> Either String Pointer
@@ -149,69 +119,69 @@ parse' [] p@(_, _) = Left "Parse error"
 parse' (t:ts) p@(n, allc) =
 	case (t, n) of
 
-		(Number x, Empty) -> topOper (newValue x, allc) >>= parse' ts
+		(Number x, Empty) -> topOper (Value x, allc) >>= parse' ts
 		(Number x, _) -> Left ("Unexpected number: " ++ show x)
 
 		(Operator op, Empty) ->
 			if op `elem` unaryOperators then
-				goDown 0 (newUnOper op Empty, allc) >>= parse' ts
+				goDown (UnOper op Empty, allc) >>= parse' ts
 			else
 				Left ([op] ++ " is not a unary operator")
-		(Operator op, Node (Value _) _ _) ->
+		(Operator op, Value _) ->
 			if op `elem` operators then
-				goDown 1 (newBiOper op n Empty, allc) >>= parse' ts
+				goDown (BiOper op n Empty, allc) >>= parse' ts
 			else
 				Left ([op] ++ " is not an operator")
-		(Operator op, Node (UnOper _) _ _) -> 
+		(Operator op, UnOper _ _) -> 
 			if op `elem` operators then
-				goDown 1 (newBiOper op n Empty, allc) >>= parse' ts
+				goDown (BiOper op n Empty, allc) >>= parse' ts
 			else
 				Left ([op] ++ " is not an operator")
-		(Operator op, Node (BiOper op2) (Just arg1) (Just arg2)) -> 
+		(Operator op, BiOper op2 arg1 arg2) -> 
 			if priority op < priority op2 then
-				let p' = (newBiOper op2 arg1 $ newBiOper op arg2 Empty, allc)
-				in goDown 1 p' >>= goDown 1 >>= parse' ts
+				let p' = (BiOper op2 arg1 $ BiOper op arg2 Empty, allc)
+				in goDown p' >>= goDown >>= parse' ts
 			else
-				let p' = (newBiOper op n Empty, allc)
-				in goDown 1 p' >>= parse' ts
-		(Operator op, Node Paren _ _) ->
+				let p' = (BiOper op n Empty, allc)
+				in goDown p' >>= parse' ts
+		(Operator op, Paren _) ->
 			if op `elem` operators then
-				goDown 1 (newBiOper op n Empty, allc) >>= parse' ts
+				goDown (BiOper op n Empty, allc) >>= parse' ts
 			else
 				Left ([op] ++ " is not an operator")
 
-		(LeftParen, Empty) -> goDown 0 (newParen Empty, allc) >>= parse' ts
+		(LeftParen, Empty) -> goDown (Paren Empty, allc) >>= parse' ts
 		(LeftParen, _) -> Left "Unexpected parenthesis: ("
 
 		(RightParen, Empty) -> Left "Unexpected parenthesis: )"
 		(RightParen, _) -> do
 			par <- curParen p
 			case par of
-				(Node Paren _ _, []) -> parse' ts par
+				(Paren _, []) -> parse' ts par
 				(_, []) -> Left "Unexpected parenthesis: )"
 				_ -> topOper par >>= parse' ts
 
 -- parse expression in string
-parse :: String -> Either String Tree
-parse str = (tokenize [] str) >>= (flip parse') (Empty, []) >>= getTree
+parse :: String -> Either String ParseTree
+parse str = (tokenize [] str) >>= (flip parse') (Empty, []) >>= getParseTree
 
-evalTree :: Tree -> Double
-evalTree Empty = 0.0
-evalTree (Node (Value x) _ _) = x
-evalTree (Node (UnOper op) (Just t) _) =
+evalParseTree :: ParseTree -> Double
+evalParseTree Empty = 0.0
+evalParseTree (Value x) = x
+evalParseTree (UnOper op t) =
 	case op of
-		'+' -> evalTree t
-		'-' -> negate $ evalTree t
-evalTree (Node (BiOper op) (Just t1) (Just t2)) =
+		'+' -> evalParseTree t
+		'-' -> negate $ evalParseTree t
+evalParseTree (BiOper op t1 t2) =
 	case op of
-		'+' -> evalTree t1 + evalTree t2
-		'-' -> evalTree t1 - evalTree t2
-		'*' -> evalTree t1 * evalTree t2
-		'/' -> evalTree t1 / evalTree t2
-		'^' -> evalTree t1 ** evalTree t2
-evalTree (Node Paren (Just t) _) = evalTree t
+		'+' -> evalParseTree t1 + evalParseTree t2
+		'-' -> evalParseTree t1 - evalParseTree t2
+		'*' -> evalParseTree t1 * evalParseTree t2
+		'/' -> evalParseTree t1 / evalParseTree t2
+		'^' -> evalParseTree t1 ** evalParseTree t2
+evalParseTree (Paren t) = evalParseTree t
 
 eval :: String -> Double
 eval str = case parse str of
 	Left err -> error err
-	Right tree -> evalTree tree
+	Right tree -> evalParseTree tree
