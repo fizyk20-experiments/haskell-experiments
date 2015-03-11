@@ -132,42 +132,74 @@ topOper p@(n, allc) =
 		_ -> return p
 
 parse' :: [Token] -> Pointer -> Either String Pointer
-parse' [] p = return p
+parse' [] p@(_, []) = return p
+parse' [] p@(_, _) = Left "Parse error"
 parse' (t:ts) p@(n, allc) =
-	case t of
-		Number x -> 
-			case n of
-				Empty -> topOper (Node (Value x) Nothing Nothing, allc) >>= parse' ts
-				_ -> Left ("Unexpected number: " ++ show x)
-		Operator op ->
-			case n of
-				Empty -> 
-					if op `elem` unaryOperators then
-							goDown 0 (Node (UnOper op) (Just Empty) Nothing, allc) >>= parse' ts
-					else
-						Left ([op] ++ " is not a unary operator")
-				Node (Value _) _ _ ->
-					if op `elem` operators then
-						goDown 1 (Node (BiOper op) (Just n) (Just Empty), allc) >>= parse' ts
-					else
-						Left ([op] ++ " is not an operator")
-				Node (UnOper _) _ _ -> 
-					if op `elem` operators then
-						goDown 1 (Node (BiOper op) (Just n) (Just Empty), allc) >>= parse' ts
-					else
-						Left ([op] ++ " is not an operator")
+	case (t, n) of
 
-				Node (BiOper op2) (Just arg1) (Just arg2) -> 
-					if priority op < priority op2 then
-						let p' = (Node (BiOper op2) (Just arg1) (Just $ Node (BiOper op) (Just arg2) (Just Empty)), allc)
-						in goDown 1 p' >>= goDown 1 >>= parse' ts
-					else
-						let p' = (Node (BiOper op) (Just n) (Just Empty), allc)
-						in goDown 1 p' >>= parse' ts
-				Node Paren _ _ -> Left ""
-		LeftParen -> Left "Error"
-		RightParen -> Left "Error"
+		(Number x, Empty) -> topOper (Node (Value x) Nothing Nothing, allc) >>= parse' ts
+		(Number x, _) -> Left ("Unexpected number: " ++ show x)
+
+		(Operator op, Empty) ->
+			if op `elem` unaryOperators then
+				goDown 0 (Node (UnOper op) (Just Empty) Nothing, allc) >>= parse' ts
+			else
+				Left ([op] ++ " is not a unary operator")
+		(Operator op, Node (Value _) _ _) ->
+			if op `elem` operators then
+				goDown 1 (Node (BiOper op) (Just n) (Just Empty), allc) >>= parse' ts
+			else
+				Left ([op] ++ " is not an operator")
+		(Operator op, Node (UnOper _) _ _) -> 
+			if op `elem` operators then
+				goDown 1 (Node (BiOper op) (Just n) (Just Empty), allc) >>= parse' ts
+			else
+				Left ([op] ++ " is not an operator")
+		(Operator op, Node (BiOper op2) (Just arg1) (Just arg2)) -> 
+			if priority op < priority op2 then
+				let p' = (Node (BiOper op2) (Just arg1) (Just $ Node (BiOper op) (Just arg2) (Just Empty)), allc)
+				in goDown 1 p' >>= goDown 1 >>= parse' ts
+			else
+				let p' = (Node (BiOper op) (Just n) (Just Empty), allc)
+				in goDown 1 p' >>= parse' ts
+		(Operator op, Node Paren _ _) ->
+			if op `elem` operators then
+				goDown 1 (Node (BiOper op) (Just n) (Just Empty), allc) >>= parse' ts
+			else
+				Left ([op] ++ " is not an operator")
+
+		(LeftParen, Empty) -> goDown 0 (Node Paren (Just Empty) Nothing, allc) >>= parse' ts
+		(LeftParen, _) -> Left "Unexpected parenthesis: ("
+
+		(RightParen, Empty) -> Left "Unexpected parenthesis: )"
+		(RightParen, _) -> do
+			par <- curParen p
+			case par of
+				(Node Paren _ _, []) -> parse' ts par
+				(_, []) -> Left "Unexpected parenthesis: )"
+				_ -> topOper par >>= parse' ts
 
 -- parse expression in string
 parse :: String -> Either String Tree
 parse str = (tokenize [] str) >>= (flip parse') (Empty, []) >>= getTree
+
+evalTree :: Tree -> Double
+evalTree Empty = 0.0
+evalTree (Node (Value x) _ _) = x
+evalTree (Node (UnOper op) (Just t) _) =
+	case op of
+		'+' -> evalTree t
+		'-' -> negate $ evalTree t
+evalTree (Node (BiOper op) (Just t1) (Just t2)) =
+	case op of
+		'+' -> evalTree t1 + evalTree t2
+		'-' -> evalTree t1 - evalTree t2
+		'*' -> evalTree t1 * evalTree t2
+		'/' -> evalTree t1 / evalTree t2
+		'^' -> evalTree t1 ** evalTree t2
+evalTree (Node Paren (Just t) _) = evalTree t
+
+eval :: String -> Double
+eval str = case parse str of
+	Left err -> error err
+	Right tree -> evalTree tree
