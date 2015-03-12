@@ -53,6 +53,7 @@ consumeToken = state $ \s -> case s of
 		| c `elem` operators -> (Just $ Operator c, LexerReady (i+1) rest)
 		| c == '(' -> (Just LeftParen, LexerReady (i+1) rest)
 		| c == ')' -> (Just RightParen, LexerReady (i+1) rest)
+		| c `elem` " \n" -> runState consumeToken $ LexerReady (i+1) rest
 		| otherwise -> lexerError i c
 
 	LexerNumber i t [] -> (Just $ Number $ read t, LexerFinished)
