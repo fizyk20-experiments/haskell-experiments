@@ -5,7 +5,12 @@ import Control.Monad.State
 import Data.Char
 
 -- possible tokens
-data Token = Number Double | Operator Char | LeftParen | RightParen deriving (Show)
+data Token = 
+	Number Double 
+	| Operator Char 
+	| LeftParen 
+	| RightParen 
+	deriving (Show)
 
 digits = "0123456789"
 hexDigitsCapital = "ABCDEF"
@@ -14,12 +19,14 @@ hexSuffixes = "hH"
 operators = "+-*/"
 unaryOperators = "+-"
 
-data LexerState = LexerError String 
-				| LexerReady { pos :: Int, remains :: String }
-				| LexerNumber { pos :: Int, token :: String, remains :: String }
-				| LexerNumberDot { pos :: Int, token :: String, remains :: String }
-				| LexerHexNumber { pos :: Int, token :: String, remains :: String }
-				| LexerFinished
+data LexerState = 
+	LexerError String 
+	| LexerReady { pos :: Int, remains :: String }
+	| LexerNumber { pos :: Int, token :: String, remains :: String }
+	| LexerNumberDot { pos :: Int, token :: String, remains :: String }
+	| LexerHexNumber { pos :: Int, token :: String, remains :: String }
+	| LexerFinished
+	deriving (Show)
 
 ord' :: (Num a) => Char -> a
 ord' = fromIntegral . ord
