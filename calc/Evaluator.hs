@@ -1,3 +1,5 @@
+module Evaluator where
+
 import Parser
 
 evalParseTree :: ParseTree -> Double
@@ -16,7 +18,7 @@ evalParseTree (BiOper op t1 t2) =
 		'^' -> evalParseTree t1 ** evalParseTree t2
 evalParseTree (Paren t) = evalParseTree t
 
-eval :: String -> Double
+eval :: String -> Either String Double
 eval str = case parse str of
-	Left err -> error err
-	Right tree -> evalParseTree tree
+	Left err -> Left err
+	Right tree -> Right $ evalParseTree tree
