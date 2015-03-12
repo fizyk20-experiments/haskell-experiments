@@ -1,12 +1,16 @@
 import Control.Monad
+import Control.Monad.State
 import Data.Char
 
 -- possible tokens
 data Token = Number Double | Operator Char | LeftParen | RightParen deriving (Show)
 
-digits = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']
-operators = ['+', '-', '*', '/', '^']
-unaryOperators = ['+', '-']
+digits = "0123456789"
+hexDigitsCapital = "ABCDEF"
+hexDigitsSmall = "abcdef"
+hexSuffixes = "hH"
+operators = "+-*/"
+unaryOperators = "+-"
 
 priority :: Char -> Int
 priority '^' = 0
@@ -16,49 +20,51 @@ priority '+' = 2
 priority '-' = 2
 priority c = error ("Not an operator: " ++ [c])
 
-data NumberParseState = NumberParseState { mul :: Double, currentNumber :: Double, restParse :: String} | Failure String deriving (Show)
-parseNumber' :: NumberParseState -> NumberParseState
-parseNumber' s@(NumberParseState _ x "") = s
-parseNumber' s@(NumberParseState mul x (c:rest)) = 
-	case c of
-		c | c `elem` digits -> incNumber (ord c - 48)
-		'.' -> if mul < 1.0 then Failure "Double dot" else parseNumber' (NumberParseState 0.1 x rest)
-		_ 	-> s
-	where
-		incNumber i = parseNumber' $ NumberParseState (if mul < 1.0 then mul * 0.1 else mul) (x * (if mul < 1.0 then 1 else 10) + fromIntegral i * mul) rest
-parseNumber' f@(Failure _) = f
+data LexerState = LexerError String 
+				| LexerReady { pos :: Int, remains :: String }
+				| LexerNumber { pos :: Int, token :: String, remains :: String }
+				| LexerNumberDot { pos :: Int, token :: String, remains :: String }
+				| LexerHexNumber { pos :: Int, token :: String, remains :: String }
+				| LexerFinished
 
--- parse a number from the beginning of a string
-parseNumber :: String -> NumberParseState
-parseNumber s = parseNumber' $ NumberParseState { mul = 1.0, currentNumber = 0.0, restParse = s}
+consumeToken :: State LexerState (Maybe Token)
+consumeToken = state $ \s -> case s of
+	LexerError err -> (Nothing, LexerError err)
+	LexerFinished -> (Nothing, LexerFinished)
+	LexerReady _ "" -> (Nothing, LexerFinished)
+	LexerReady i (c:rest)
+		| c `elem` digits -> runState consumeToken $ LexerNumber (i+1) [c] rest
+		| c `elem` operators -> (Just $ Operator c, LexerReady (i+1) rest)
+		| c == '(' -> (Just LeftParen, LexerReady (i+1) rest)
+		| c == ')' -> (Just RightParen, LexerReady (i+1) rest)
+		| otherwise -> lexerError i c
+	LexerNumber i t [] -> (Just $ Number $ read t, LexerFinished)
+	LexerNumber i t (c:rest)
+		| c `elem` digits -> runState consumeToken $ LexerNumber (i+1) (t ++ [c]) rest
+		| c == '.' -> runState consumeToken $ LexerNumberDot (i+1) (t ++ [c]) rest
+		| otherwise -> (Just $ Number $ read t, LexerReady i (c:rest))
+	LexerNumberDot i t [] -> (Just $ Number $ read t, LexerFinished)
+	LexerNumberDot i t (c:rest)
+		| c `elem` digits -> runState consumeToken $ LexerNumberDot (i+1) (t ++ [c]) rest
+		| c == '.' -> lexerError i c
+		| otherwise -> (Just $ Number $ read t, LexerReady i (c:rest))
 
-consumeToken :: String -> Either String (Token, String)
--- returns the next token and the rest of the string
-consumeToken "" = Left "Unexpected EOF"
-consumeToken s@(c:rest) = 
-	case c of
-		c | c `elem` digits -> num
-		'.' -> num
-		c | c `elem` operators -> Right $ (Operator c, rest)
-		'(' -> Right (LeftParen, rest)
-		')' -> Right (RightParen, rest)
-		' ' -> consumeToken rest
-		_	-> Left ("Invalid character: " ++ [c])
-	where
-		state = parseNumber s
-		x = currentNumber state
-		rest' = restParse state 
-		num = 
-			case state of
-				Failure s -> Left ("Parse error: " ++ s)
-				_ -> Right (Number x, rest')
+	where lexerError i c = (Nothing, LexerError ("Unexpected character '" ++ [c] ++ "' at position " ++ show i))
 
-tokenize :: [Token] -> String -> Either String [Token]
--- returns splitting into tokens
-tokenize tokens "" = return tokens
-tokenize tokens str = do
-	(token, rest) <- consumeToken str
-	tokenize (tokens ++ [token]) rest
+tokenizeAction :: State LexerState [Token]
+tokenizeAction = do
+	token <- consumeToken
+	case token of
+		Nothing -> return []
+		Just t -> do
+			rest <- tokenizeAction
+			return (t:rest)
+
+tokenize :: String -> Either String [Token]
+tokenize str = case (runState tokenizeAction . LexerReady 1) str of
+	(l, LexerFinished) -> Right l
+	(_, LexerError err) -> Left err
+	(_, LexerReady _ err) -> Left err
 
 -- parsing
 data ParseTree = Empty | Value Double | UnOper Char ParseTree | BiOper Char ParseTree ParseTree | Paren ParseTree deriving (Show)
@@ -84,9 +90,9 @@ goDown (t, cs) =
 	case t of
 		Empty -> Left "Can't go down from Empty"
 		Value _ -> Left "Can't go down from Value"
-		UnOper o n -> Right (n, (UnOper o Empty):cs)
-		Paren n -> Right (n, (Paren Empty):cs)
-		BiOper o n1 n2 -> Right (n2, (BiOper o n1 Empty):cs)
+		UnOper o n -> Right (n, UnOper o Empty : cs)
+		Paren n -> Right (n, Paren Empty : cs)
+		BiOper o n1 n2 -> Right (n2, BiOper o n1 Empty : cs)
 
 toTop :: Pointer -> Either String Pointer
 toTop p@(_, []) = Right p
@@ -101,7 +107,7 @@ getParseTree p = do
 
 curParen :: Pointer -> Either String Pointer
 curParen p@(_, []) = Right p
-curParen p@((Paren _ ), cs) = Right p
+curParen p@(Paren _ , cs) = Right p
 curParen p@(t, c:cs) = do
 	p' <- goUp p
 	curParen p'
@@ -109,8 +115,8 @@ curParen p@(t, c:cs) = do
 topOper :: Pointer -> Either String Pointer
 topOper p@(n, allc) =
 	case allc of
-		((BiOper _ _ Empty):_) -> goUp p >>= topOper
-		((UnOper _ Empty):_) -> goUp p >>= topOper
+		BiOper _ _ Empty : _ -> goUp p >>= topOper
+		UnOper _ Empty : _ -> goUp p >>= topOper
 		_ -> return p
 
 parse' :: [Token] -> Pointer -> Either String Pointer
@@ -126,17 +132,17 @@ parse' (t:ts) p@(n, allc) =
 			if op `elem` unaryOperators then
 				goDown (UnOper op Empty, allc) >>= parse' ts
 			else
-				Left ([op] ++ " is not a unary operator")
+				Left (op : " is not a unary operator")
 		(Operator op, Value _) ->
 			if op `elem` operators then
 				goDown (BiOper op n Empty, allc) >>= parse' ts
 			else
-				Left ([op] ++ " is not an operator")
+				Left (op : " is not an operator")
 		(Operator op, UnOper _ _) -> 
 			if op `elem` operators then
 				goDown (BiOper op n Empty, allc) >>= parse' ts
 			else
-				Left ([op] ++ " is not an operator")
+				Left (op : " is not an operator")
 		(Operator op, BiOper op2 arg1 arg2) -> 
 			if priority op < priority op2 then
 				let p' = (BiOper op2 arg1 $ BiOper op arg2 Empty, allc)
@@ -148,7 +154,7 @@ parse' (t:ts) p@(n, allc) =
 			if op `elem` operators then
 				goDown (BiOper op n Empty, allc) >>= parse' ts
 			else
-				Left ([op] ++ " is not an operator")
+				Left (op : " is not an operator")
 
 		(LeftParen, Empty) -> goDown (Paren Empty, allc) >>= parse' ts
 		(LeftParen, _) -> Left "Unexpected parenthesis: ("
@@ -163,7 +169,7 @@ parse' (t:ts) p@(n, allc) =
 
 -- parse expression in string
 parse :: String -> Either String ParseTree
-parse str = (tokenize [] str) >>= (flip parse') (Empty, []) >>= getParseTree
+parse str = tokenize str >>= flip parse' (Empty, []) >>= getParseTree
 
 evalParseTree :: ParseTree -> Double
 evalParseTree Empty = 0.0
