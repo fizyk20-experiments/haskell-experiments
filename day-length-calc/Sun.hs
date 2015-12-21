@@ -95,8 +95,8 @@ sunAzim l n
         az = rad2deg $ atan2 sinAz cosAz
         
 -- Sunrise, sunset
-diffThreshold :: (Num a) => a
-diffThreshold = 5
+diffThreshold :: (Fractional a) => a
+diffThreshold = 0.2
 
 sunBinSearch :: Location -> UTCTime -> UTCTime -> Maybe DiffTime
 sunBinSearch l time1 time2
@@ -115,3 +115,12 @@ sunrise l d = sunBinSearch l (UTCTime d (secondsToDiffTime 0)) (UTCTime d (secon
 
 sunset :: Location -> Day -> Maybe DiffTime
 sunset l d = sunBinSearch l (UTCTime d (secondsToDiffTime 43200)) (UTCTime d (secondsToDiffTime 86400))
+
+dayLength :: Location -> Day -> Maybe DiffTime
+dayLength l d = maybeDiff time1 time2
+    where
+        maybeDiff Nothing _ = Nothing
+        maybeDiff _ Nothing = Nothing
+        maybeDiff (Just t1) (Just t2) = Just (t1 - t2)
+        time1 = sunset l d
+        time2 = sunrise l d
