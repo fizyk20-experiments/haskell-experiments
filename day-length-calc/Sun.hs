@@ -99,10 +99,27 @@ sunAzim l n
 diffThreshold :: (Fractional a) => a
 diffThreshold = 0.2
 
-sunBinSearch :: Location -> UTCTime -> UTCTime -> Maybe DiffTime
+timeDiff :: (Num a) => Location -> a
+timeDiff l = fromIntegral (floor (lon l * 240))
+
+findNoon :: Location -> Day -> UTCTime
+findNoon l d = findNoonBin l time1 time2
+    where
+        time1 = addUTCTime (41400 - timeDiff l) (UTCTime d 0)
+        time2 = addUTCTime (45000 - timeDiff l) (UTCTime d 0)
+        findNoonBin l t1 t2
+            | diffUTCTime t2 t1 < diffThreshold = t1
+            | elev1 < elev2 = findNoonBin l timeMid t2
+            | otherwise = findNoonBin l t1 timeMid
+            where elev1 = sunElev l (j2000 t1)
+                  elev2 = sunElev l (j2000 t2)
+                  timeMid = addUTCTime (diffUTCTime t2 t1 / 2) t1
+                  elevMid = sunElev l (j2000 timeMid)
+                
+sunBinSearch :: Location -> UTCTime -> UTCTime -> Maybe UTCTime
 sunBinSearch l time1 time2
     | elev1 * elev2 > 0 = Nothing
-    | diffUTCTime time2 time1 < diffThreshold = Just (utctDayTime time1)
+    | diffUTCTime time2 time1 < diffThreshold = Just time1
     | elev1 * elevMid <= 0 = sunBinSearch l time1 timeMid
     | elevMid * elev2 <= 0 = sunBinSearch l timeMid time2
     | otherwise = Nothing
@@ -112,16 +129,22 @@ sunBinSearch l time1 time2
           elevMid = sunElev l (j2000 timeMid)
 
 sunrise :: Location -> Day -> Maybe UTCTime
-sunrise l d = UTCTime d <$> sunBinSearch l (UTCTime d (secondsToDiffTime 0)) (UTCTime d (secondsToDiffTime 43200))
+sunrise l d = sunBinSearch l midnight noon
+    where
+        noon = findNoon l d
+        midnight = addUTCTime (-43200) noon
 
 sunset :: Location -> Day -> Maybe UTCTime
-sunset l d = UTCTime d <$> sunBinSearch l (UTCTime d (secondsToDiffTime 43200)) (UTCTime d (secondsToDiffTime 86400))
+sunset l d = sunBinSearch l noon midnight
+    where
+        noon = findNoon l d
+        midnight = addUTCTime 43200 noon
 
 dayLength :: Location -> Day -> Maybe DiffTime
 dayLength l d = maybeDiff time1 time2
     where
         maybeDiff Nothing _ = Nothing
         maybeDiff _ Nothing = Nothing
-        maybeDiff (Just t1) (Just t2) = Just (t1 - t2)
-        time1 = utctDayTime <$> sunset l d
-        time2 = utctDayTime <$> sunrise l d
+        maybeDiff (Just t1) (Just t2) = Just $ secondsToDiffTime $ floor $ diffUTCTime t1 t2
+        time1 = sunset l d
+        time2 = sunrise l d

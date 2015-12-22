@@ -98,6 +98,6 @@ main = do
     let list = genDayList (start options) (end options)
     let lat = latitude options
     let lon = longitude options
-    putStrLn ("Location: Lat " ++ show lat ++ "; Lon" ++ show lon)
+    putStrLn ("Location: Lat " ++ show lat ++ "; Lon " ++ show lon)
     mapM_ (putStrLn . formatLine (Loc lat lon)) list
     
