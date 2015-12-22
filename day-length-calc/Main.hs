@@ -7,22 +7,35 @@ import Data.List
 import System.Locale
 import Options.Applicative
 
-showTime :: Maybe DiffTime -> String
-showTime Nothing = "Nothing"
-showTime (Just t) = show h ++ "h " ++ show m ++ "min " ++ show s ++ "s"
+showInterval :: Maybe DiffTime -> String
+showInterval Nothing = "Nothing"
+showInterval (Just t) = show h ++ "h " ++ show m ++ "min " ++ show s ++ "s"
     where h = floor (t / 3600)
           m = floor ((t - 3600 * fromIntegral h) / 60)
           s = floor (t - 3600 * fromIntegral h - 60 * fromIntegral m)
+          
+showTime :: Maybe UTCTime -> String
+showTime Nothing = "N/A"
+showTime (Just x) = formatTime defaultTimeLocale "%T" x
 
-showDate :: UTCTime -> String
-showDate = formatTime defaultTimeLocale "%F"
+showDate :: Maybe UTCTime -> String
+showDate Nothing = "Nothing"
+showDate (Just x) = formatTime defaultTimeLocale "%F" x
+
+newtype MDay = MDay (Maybe Day)
+    
+instance Read MDay where
+    readsPrec _ = map (\(x,y) -> (MDay $ Just x, y)) . reads
+    
+instance Show MDay where
+    show (MDay (Just x)) = show x
+    show _ = "Nothing"
 
 data Options = Options {
     latitude :: Double,
     longitude :: Double,
-    year :: Integer,
-    month :: Int,
-    day :: Int
+    start :: Day,
+    end :: MDay
 }
 
 latitudeParser :: Parser Double
@@ -41,46 +54,50 @@ longitudeParser = option auto
     <> help "Location longitude"
     <> value 20.9 )
     
-yearParser :: Parser Integer
-yearParser = option auto
-     ( long "year"
-    <> short 'y'
-    <> metavar "YEAR"
-    <> help "The year part of the date"
-    <> value 2015 )
-
-monthParser :: Parser Int
-monthParser = option auto
-     ( long "month"
-    <> short 'm'
-    <> metavar "MONTH"
-    <> help "The month part of the date"
-    <> value 3 )
+startParser :: Parser Day
+startParser = option auto
+     ( long "start"
+    <> short 's'
+    <> metavar "YYYY-MM-DD"
+    <> help "The starting date"
+    <> value (fromGregorian 2015 3 21) )
     
-dayParser :: Parser Int
-dayParser = option auto
-     ( long "day"
-    <> short 'd'
-    <> metavar "DAY"
-    <> help "The day part of the date"
-    <> value 21 )
+endParser :: Parser MDay
+endParser = option auto
+     ( long "end"
+    <> short 'e'
+    <> metavar "YYYY-MM-DD"
+    <> help "The ending date"
+    <> value (MDay Nothing) )
 
 opts :: Parser Options   
 opts = Options
     <$> latitudeParser
     <*> longitudeParser
-    <*> yearParser
-    <*> monthParser
-    <*> dayParser
+    <*> startParser
+    <*> endParser
+    
+genDayList :: Day -> MDay -> [Day]
+genDayList x (MDay Nothing) = [x]
+genDayList x my@(MDay (Just y))
+    | x > y = []
+    | otherwise = x : genDayList (addDays 1 x) my
+    
+formatLine :: Location -> Day -> String
+formatLine l d = showDate (Just $ UTCTime d 0) ++ ": rise " ++ showTime rise ++ ", set " ++ showTime set ++ ", length = " ++ showInterval len
+    where
+        rise = sunrise l d
+        set = sunset l d
+        len = dayLength l d
 
 main = do
     options <- execParser (info (helper <*> opts)
          ( fullDesc
         <> progDesc "Calculate the length of the given day"
         <> header "Day length calculator" ))
-    let here = Loc (latitude options) (longitude options)
-    let date = fromGregorian (year options) (month options) (day options)
-    putStrLn (showDate $ UTCTime date 0)
-    putStrLn ("Sunrise: " ++ showTime (sunrise here date))
-    putStrLn ("Sunset: " ++ showTime (sunset here date))
-    putStrLn ("Day length: " ++ showTime (dayLength here date))
+    let list = genDayList (start options) (end options)
+    let lat = latitude options
+    let lon = longitude options
+    putStrLn ("Location: Lat " ++ show lat ++ "; Lon" ++ show lon)
+    mapM_ (putStrLn . formatLine (Loc lat lon)) list
+    

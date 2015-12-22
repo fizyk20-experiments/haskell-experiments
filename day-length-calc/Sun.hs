@@ -1,5 +1,6 @@
 module Sun where
 
+import Control.Applicative
 import Data.Time.Calendar
 import Data.Time.Clock
     
@@ -110,11 +111,11 @@ sunBinSearch l time1 time2
           timeMid = addUTCTime (diffUTCTime time2 time1 / 2) time1
           elevMid = sunElev l (j2000 timeMid)
 
-sunrise :: Location -> Day -> Maybe DiffTime
-sunrise l d = sunBinSearch l (UTCTime d (secondsToDiffTime 0)) (UTCTime d (secondsToDiffTime 43200))
+sunrise :: Location -> Day -> Maybe UTCTime
+sunrise l d = UTCTime d <$> sunBinSearch l (UTCTime d (secondsToDiffTime 0)) (UTCTime d (secondsToDiffTime 43200))
 
-sunset :: Location -> Day -> Maybe DiffTime
-sunset l d = sunBinSearch l (UTCTime d (secondsToDiffTime 43200)) (UTCTime d (secondsToDiffTime 86400))
+sunset :: Location -> Day -> Maybe UTCTime
+sunset l d = UTCTime d <$> sunBinSearch l (UTCTime d (secondsToDiffTime 43200)) (UTCTime d (secondsToDiffTime 86400))
 
 dayLength :: Location -> Day -> Maybe DiffTime
 dayLength l d = maybeDiff time1 time2
@@ -122,5 +123,5 @@ dayLength l d = maybeDiff time1 time2
         maybeDiff Nothing _ = Nothing
         maybeDiff _ Nothing = Nothing
         maybeDiff (Just t1) (Just t2) = Just (t1 - t2)
-        time1 = sunset l d
-        time2 = sunrise l d
+        time1 = utctDayTime <$> sunset l d
+        time2 = utctDayTime <$> sunrise l d
